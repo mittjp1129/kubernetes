@@ -208,6 +208,26 @@ type ExpandableVolumePlugin interface {
 	RequiresFSResize() bool
 }
 
+// BlockVolumePlugin is an extend interface of VolumePlugin and is used for block volumes support.
+type BlockVolumePlugin interface {
+	VolumePlugin
+	// NewBlockVolumeMapper creates a new volume.BlockVolumeMapper from an API specification.
+	// Ownership of the spec pointer in *not* transferred.
+	// - spec: The v1.Volume spec
+	// - pod: The enclosing pod
+	NewBlockVolumeMapper(spec *Spec, podRef *v1.Pod, opts VolumeOptions) (BlockVolumeMapper, error)
+	// NewBlockVolumeUnmapper creates a new volume.BlockVolumeUnmapper from recoverable state.
+	// - name: The volume name, as per the v1.Volume spec.
+	// - podUID: The UID of the enclosing pod
+	NewBlockVolumeUnmapper(name string, podUID types.UID) (BlockVolumeUnmapper, error)
+	// ConstructBlockVolumeSpec constructs a volume spec based on the given
+	// pod name, volume name and a pod device map path.
+	// The spec may have incomplete information due to limited information
+	// from input. This function is used by volume manager to reconstruct
+	// volume spec by reading the volume directories from disk.
+	ConstructBlockVolumeSpec(podName, volumeName, mountPath string) (*Spec, error)
+}
+
 // VolumeHost is an interface that plugins can use to access the kubelet.
 type VolumeHost interface {
 	// GetPluginDir returns the absolute path to a directory under which
@@ -215,6 +235,9 @@ type VolumeHost interface {
 	// exist on disk yet.  For plugin data that is per-pod, see
 	// GetPodPluginDir().
 	GetPluginDir(pluginName string) string
+
+	//
+	GetVolumeDevicePluginDir(pluginName string) string
 
 	// GetPodVolumeDir returns the absolute path a directory which
 	// represents the named volume under the named plugin for the given
@@ -227,6 +250,13 @@ type VolumeHost interface {
 	// does not exist, the result of this call might not exist.  This
 	// directory might not actually exist on disk yet.
 	GetPodPluginDir(podUID types.UID, pluginName string) string
+
+	// GetPodVolumeDeviceDir returns the absolute path a directory which
+	// represents the named plugin for the given pod.
+	// If the specified pod does not exist, the result of this call
+	// might not exist.
+	// ex. pods/{podUid}}/volumeDevices/{escapeQualifiedPluginName}/
+	GetPodVolumeDeviceDir(podUID types.UID, pluginName string) string
 
 	// GetKubeClient returns a client interface
 	GetKubeClient() clientset.Interface
@@ -671,6 +701,32 @@ func (pm *VolumePluginMgr) FindExpandablePluginByName(name string) (ExpandableVo
 
 	if expandableVolumePlugin, ok := volumePlugin.(ExpandableVolumePlugin); ok {
 		return expandableVolumePlugin, nil
+	}
+	return nil, nil
+}
+
+//
+func (pm *VolumePluginMgr) FindMapperPluginBySpec(spec *Spec) (BlockVolumePlugin, error) {
+	volumePlugin, err := pm.FindPluginBySpec(spec)
+	if err != nil {
+		return nil, err
+	}
+
+	if blockVolumePlugin, ok := volumePlugin.(BlockVolumePlugin); ok {
+		return blockVolumePlugin, nil
+	}
+	return nil, nil
+}
+
+//
+func (pm *VolumePluginMgr) FindMapperPluginByName(name string) (BlockVolumePlugin, error) {
+	volumePlugin, err := pm.FindPluginByName(name)
+	if err != nil {
+		return nil, err
+	}
+
+	if blockVolumePlugin, ok := volumePlugin.(BlockVolumePlugin); ok {
+		return blockVolumePlugin, nil
 	}
 	return nil, nil
 }

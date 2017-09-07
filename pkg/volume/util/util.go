@@ -17,11 +17,12 @@ limitations under the License.
 package util
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"path"
-
+	"path/filepath"
 	"strings"
 
 	"github.com/golang/glog"
@@ -38,7 +39,14 @@ import (
 	"k8s.io/kubernetes/pkg/util/mount"
 )
 
-const readyFileName = "ready"
+const (
+	readyFileName = "ready"
+	losetupPath   = "losetup"
+
+	ErrDeviceNotFound     = "device not found"
+	ErrDeviceNotSupported = "device not supported"
+	ErrNotAvailable       = "not available"
+)
 
 // IsReady checks for the existence of a regular file
 // called 'ready' in the given directory and returns
@@ -269,4 +277,271 @@ func stringToSet(str, delimiter string) (sets.String, error) {
 		zonesSet.Insert(trimmedZone)
 	}
 	return zonesSet, nil
+}
+
+// BlockVolumePathHandler defines a set of operations for handling block volume-related operations
+type BlockVolumePathHandler interface {
+	// MapDevice creates a symbolic link to block device under specified map path
+	MapDevice(devicePath string, mapDir string, linkName string) error
+	// UnmapDevice removes a symbolic link to block device under specified map path
+	UnmapDevice(mapDir string, linkName string) error
+	// RemovePath removes a file or directory on specified map path
+	RemoveMapPath(mapPath string) error
+	// IsSymlinkExist retruns true if specified symbolic link exists
+	IsSymlinkExist(mapPath string) (bool, error)
+	// GetDeviceSymlinkRefs searches symbolic links under global map path
+	GetDeviceSymlinkRefs(devPath string, mapPath string) ([]string, error)
+	// FindGlobalMapPathFromPod finds corresponding symbolic link of
+	// globalMapPath under plugin dir using pod name, pod device map path.
+	FindGlobalMapPathFromPod(pluginDir, podName, mapPath string) (string, error)
+	// AttachFileDevice takes a path to a regular file and makes it available as an
+	// attached block device.
+	AttachFileDevice(path string, exec mount.Exec) (string, error)
+	// GetLoopDevice returns the full path to the loop device associated with the given path.
+	GetLoopDevice(path string, exec mount.Exec) (string, error)
+	// RemoveLoopDevice removes specified loopback device
+	RemoveLoopDevice(device string, exec mount.Exec) error
+}
+
+// NewBlockVolumePathHandler returns a new instance of BlockVolumeHandler.
+func NewBlockVolumePathHandler() BlockVolumePathHandler {
+	var volumePathHandler VolumePathHandler
+	return volumePathHandler
+}
+
+// VolumePathHandler is path related operation handlers for block volume
+type VolumePathHandler struct {
+}
+
+// MapDevice creates a symbolic link to block device under specified map path
+func (v VolumePathHandler) MapDevice(devicePath string, mapDir string, linkName string) error {
+	// example of global map path:
+	//   devicePath: plugins/kubernetes.io/{PluginName}/{DefaultKubeletVolumeDevicesDirName}/{volumeName}
+	//   linkName: {podUid}
+	//
+	// example of pod device map path:
+	//   devicePath: pods/{podUid}/{DefaultKubeletVolumeDevicesDirName}/{escapeQualifiedPluginName}
+	//   linkName: {volumeName}
+	if len(devicePath) == 0 {
+		return fmt.Errorf("Failed to map device to map path. devicePath is empty")
+	}
+	if len(mapDir) == 0 {
+		return fmt.Errorf("Failed to map device to map path. mapDir is empty")
+	}
+	if !filepath.IsAbs(mapDir) {
+		return fmt.Errorf("The map path should be absolute: map path: %s", mapDir)
+	}
+	glog.V(5).Infof("MapDevice: devicePath %s", devicePath)
+	glog.V(5).Infof("MapDevice: mapDir %s", mapDir)
+	glog.V(5).Infof("MapDevice: linkName %s", linkName)
+
+	_, err := os.Stat(mapDir)
+	if err != nil && !os.IsNotExist(err) {
+		glog.Errorf("cannot validate map path: %s", mapDir)
+		return err
+	}
+	if err = os.MkdirAll(mapDir, 0750); err != nil {
+		return fmt.Errorf("Failed to mkdir %s, error", mapDir)
+	}
+	// If old symlink exits, remove it then create new one
+	linkPath := path.Join(mapDir, string(linkName))
+	if islinkExist, checkErr := v.IsSymlinkExist(linkPath); checkErr != nil {
+		return checkErr
+	} else if islinkExist {
+		if err = os.Remove(linkPath); err != nil {
+			return err
+		}
+	}
+	if err := os.Symlink(devicePath, linkPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+// UnmapDevice removes a symbolic link to block device under specified map path
+func (v VolumePathHandler) UnmapDevice(mapDir string, linkName string) error {
+	if len(mapDir) == 0 {
+		return fmt.Errorf("Failed to unmap device from map path. mapDir is empty")
+	}
+	glog.V(5).Infof("UnmapDevice: mapDir %s", mapDir)
+	glog.V(5).Infof("UnmapDevice: linkName %s", linkName)
+
+	// Check symbolic link exists
+	linkPath := path.Join(mapDir, string(linkName))
+	if islinkExist, checkErr := v.IsSymlinkExist(linkPath); checkErr != nil {
+		return checkErr
+	} else if !islinkExist {
+		glog.Warningf("Warning: Unmap skipped because symlink does not exist on the path: %v", linkPath)
+		return nil
+	}
+	if err := os.Remove(linkPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+// RemovePath removes a file or directory on specified map path
+func (v VolumePathHandler) RemoveMapPath(mapPath string) error {
+	if len(mapPath) == 0 {
+		return fmt.Errorf("Failed to remove map path. mapPath is empty")
+	}
+	glog.V(5).Infof("RemoveMapPath: mapPath %s", mapPath)
+	err := os.Remove(mapPath)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// IsSymlinkExist retruns true if specified symbolic link exists
+func (v VolumePathHandler) IsSymlinkExist(mapPath string) (bool, error) {
+	fi, err := os.Lstat(mapPath)
+	if err == nil && fi.Mode()&os.ModeSymlink == os.ModeSymlink {
+		return true, nil
+	} else if os.IsNotExist(err) {
+		return false, nil
+	} else {
+		return false, err
+	}
+}
+
+// GetDeviceSymlinkRefs searches symbolic links under global map path
+func (v VolumePathHandler) GetDeviceSymlinkRefs(devPath string, mapPath string) ([]string, error) {
+	var refs []string
+	files, err := ioutil.ReadDir(mapPath)
+	if err != nil {
+		return nil, fmt.Errorf("Directory cannot read %v", err)
+	}
+	for _, file := range files {
+		if file.Mode()&os.ModeSymlink != os.ModeSymlink {
+			continue
+		}
+		filename := file.Name()
+		filepath, err := os.Readlink(path.Join(mapPath, filename))
+		if err != nil {
+			return nil, fmt.Errorf("Symbolic link cannot be retrieved %v", err)
+		}
+		glog.V(5).Infof("GetDeviceSymlinkRefs: filepath: %v, devPath: %v", filepath, devPath)
+		if filepath == devPath {
+			refs = append(refs, path.Join(mapPath, filename))
+		}
+	}
+	glog.V(5).Infof("GetDeviceSymlinkRefs: refs %v", refs)
+	return refs, nil
+}
+
+// FindGlobalMapPathFromPod finds corresponding symbolic link of
+// globalMapPath under plugin dir using pod name, pod device map path.
+// ex. device map Path: pods/{podUid}}/{DefaultKubeletVolumeDevicesDirName}/{escapeQualifiedPluginName}/{volumeName}
+//     global map path: plugins/kubernetes.io/{PluginName}/{DefaultKubeletVolumeDevicesDirName}/{volumePluginDependentPath}/{pod uuid}
+func (v VolumePathHandler) FindGlobalMapPathFromPod(pluginDir, podName, mapPath string) (string, error) {
+	var globalMapPath string
+	// Find symbolic link named pod uuid under plugin dir
+	err := filepath.Walk(pluginDir, func(path string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if (fi.Mode()&os.ModeSymlink == os.ModeSymlink) && (fi.Name() == podName) {
+			glog.V(5).Infof("GetGlobalMapPath: path %s, mapPath %s", path, mapPath)
+			if res, err := compareSymlinks(path, mapPath); err == nil && res {
+				globalMapPath = path
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	glog.V(5).Infof("GetGlobalMapPath: globalMapPath %s", globalMapPath)
+	return globalMapPath, nil
+}
+
+func compareSymlinks(global, pod string) (bool, error) {
+	devGloval, err := os.Readlink(global)
+	if err != nil {
+		return false, err
+	}
+	devPod, err := os.Readlink(global)
+	if err != nil {
+		return false, err
+	}
+	glog.V(5).Infof("CompareSymlinks: devGloval %s, devPod %s", devGloval, devPod)
+	if devGloval == devPod {
+		return true, nil
+	}
+	return false, nil
+}
+
+// AttachFileDevice takes a path to a regular file and makes it available as an
+// attached block device.
+func (v VolumePathHandler) AttachFileDevice(path string, exec mount.Exec) (string, error) {
+	blockDevicePath, err := v.GetLoopDevice(path, exec)
+	if err != nil && err.Error() != ErrDeviceNotFound {
+		return "", err
+	}
+
+	// If no existing loop device for the path, create one
+	if blockDevicePath == "" {
+		glog.V(4).Infof("Creating device for path: %s", path)
+		blockDevicePath, err = makeLoopDevice(path, exec)
+		if err != nil {
+			return "", err
+		}
+	}
+	return blockDevicePath, nil
+}
+
+// GetLoopDevice returns the full path to the loop device associated with the given path.
+func (v VolumePathHandler) GetLoopDevice(path string, exec mount.Exec) (string, error) {
+	_, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return "", errors.New(ErrNotAvailable)
+	}
+	if err != nil {
+		return "", fmt.Errorf("not attachable: %v", err)
+	}
+
+	args := []string{"-j", path}
+	out, err := exec.Run(losetupPath, args...)
+	if err != nil {
+		glog.V(2).Infof("Failed device discover command for path %s: %v", path, err)
+		return "", err
+	}
+	return parseLosetupOutputForDevice(out)
+}
+
+func makeLoopDevice(path string, exec mount.Exec) (string, error) {
+	args := []string{"-f", "--show", path}
+	out, err := exec.Run(losetupPath, args...)
+	if err != nil {
+		glog.V(2).Infof("Failed device create command for path %s: %v", path, err)
+		return "", err
+	}
+	return parseLosetupOutputForDevice(out)
+}
+
+// RemoveLoopDevice removes specified loopback device
+func (v VolumePathHandler) RemoveLoopDevice(device string, exec mount.Exec) error {
+	args := []string{"-d", device}
+	out, err := exec.Run(losetupPath, args...)
+	if err != nil {
+		if !strings.Contains(string(out), "No such device or address") {
+			return err
+		}
+	}
+	return nil
+}
+
+func parseLosetupOutputForDevice(output []byte) (string, error) {
+	if len(output) == 0 {
+		return "", errors.New(ErrDeviceNotFound)
+	}
+
+	// losetup returns device in the format:
+	// /dev/loop1: [0073]:148662 (/dev/sda)
+	device := strings.TrimSpace(strings.SplitN(string(output), ":", 2)[0])
+	if len(device) == 0 {
+		return "", errors.New(ErrDeviceNotFound)
+	}
+	return device, nil
 }

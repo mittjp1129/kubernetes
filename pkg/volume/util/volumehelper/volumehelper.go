@@ -136,3 +136,18 @@ func NewSafeFormatAndMountFromHost(pluginName string, host volume.VolumeHost) *m
 	exec := host.GetExec(pluginName)
 	return &mount.SafeFormatAndMount{Interface: mounter, Exec: exec}
 }
+
+// GetVolumeMode retrieves VolumeMode from volume.Spec object.
+// If the volume doesn't have PersistentVolume, return
+// volumeMode as filesystem to keep previous behavior.
+func GetVolumeMode(volumeSpec *volume.Spec) v1.PersistentVolumeMode {
+	if volumeSpec == nil || volumeSpec.PersistentVolume == nil {
+		return v1.PersistentVolumeFilesystem
+	}
+	if volumeSpec.PersistentVolume.Spec.VolumeMode != nil {
+		return *volumeSpec.PersistentVolume.Spec.VolumeMode
+	}
+	// If these parameters are nil or volumeMode is not Block, we should
+	// override the value as filesystem for the backward compatibility.
+	return v1.PersistentVolumeFilesystem
+}
