@@ -227,27 +227,27 @@ func (plugin *fcPlugin) ConstructVolumeSpec(volumeName, mountPath string) (*volu
 
 // ConstructBlockVolumeSpec creates a new volume.Spec with following steps.
 //   - Searchs a file whose name is {pod uuid} under volume plugin directory.
-//   - If a file is found, then retreives volumePluginDependentPath from global map path.
+//   - If a file is found, then retreives volumePluginDependentPath from globalMapPathUUID.
 //   - Once volumePluginDependentPath is obtained, store volume information to VolumeSource
 // examples:
-//   device map Path: pods/{podUid}}/{DefaultKubeletVolumeDevicesDirName}/{escapeQualifiedPluginName}/{volumeName}
-//   global map path: plugins/kubernetes.io/{PluginName}/{DefaultKubeletVolumeDevicesDirName}/{volumePluginDependentPath}/{pod uuid}
-func (plugin *fcPlugin) ConstructBlockVolumeSpec(podName, volumeName, mapPath string) (*volume.Spec, error) {
+//   mapPath: pods/{podUid}}/{DefaultKubeletVolumeDevicesDirName}/{escapeQualifiedPluginName}/{volumeName}
+//   globalMapPathUUID : plugins/kubernetes.io/{PluginName}/{DefaultKubeletVolumeDevicesDirName}/{volumePluginDependentPath}/{pod uuid}
+func (plugin *fcPlugin) ConstructBlockVolumeSpec(podUID types.UID, volumeName, mapPath string) (*volume.Spec, error) {
 	pluginDir := plugin.host.GetVolumeDevicePluginDir(fcPluginName)
 	blkutil := util.NewBlockVolumePathHandler()
-	globalMapPath, err := blkutil.FindGlobalMapPathFromPod(pluginDir, podName, mapPath)
+	globalMapPathUUID, err := blkutil.FindGlobalMapPathUUIDFromPod(pluginDir, mapPath, podUID)
 	if err != nil {
 		return nil, err
 	}
-	glog.V(5).Infof("globalMapPath: %v, err: %v", globalMapPath, err)
+	glog.V(5).Infof("globalMapPathUUID: %v, err: %v", globalMapPathUUID, err)
 
-	// Retreive volumePluginDependentPath from globalMapPath
-	// globalMapPath examples:
-	//   plugins/kubernetes.io/fc/volumeDevices/50060e801049cfd1-lun-0/{pod uuid}
-	//   plugins/kubernetes.io/fc/volumeDevices/3600508b400105e210000900000490000/{pod uuid}
-	arr := strings.Split(globalMapPath, "/")
+	// Retreive volumePluginDependentPath from globalMapPathUUID
+	// globalMapPathUUID examples:
+	//   wwn+lun: plugins/kubernetes.io/fc/volumeDevices/50060e801049cfd1-lun-0/{pod uuid}
+	//   wwid: plugins/kubernetes.io/fc/volumeDevices/3600508b400105e210000900000490000/{pod uuid}
+	arr := strings.Split(globalMapPathUUID, "/")
 	if len(arr) < 2 {
-		return nil, fmt.Errorf("Fail to retreive volume plugin information from globalMapPath: %v", globalMapPath)
+		return nil, fmt.Errorf("Fail to retreive volume plugin information from globalMapPathUUID: %v", globalMapPathUUID)
 	}
 	l := len(arr) - 2
 	volumeInfo := arr[l]
@@ -270,6 +270,9 @@ func (plugin *fcPlugin) ConstructBlockVolumeSpec(podName, volumeName, mapPath st
 				},
 			},
 		}
+		glog.V(5).Infof("ConstructBlockVolumeSpec: TargetWWNs: %v, Lun: %v",
+			fcVolume.VolumeSource.FC.TargetWWNs,
+			fcVolume.VolumeSource.FC.Lun)
 	} else {
 		fcVolume = &v1.Volume{
 			Name: volumeName,
@@ -279,6 +282,7 @@ func (plugin *fcPlugin) ConstructBlockVolumeSpec(podName, volumeName, mapPath st
 				},
 			},
 		}
+		glog.V(5).Infof("ConstructBlockVolumeSpec: WWIDs: %v", fcVolume.VolumeSource.FC.WWIDs)
 	}
 	return volume.NewSpecFromVolume(fcVolume), nil
 }
@@ -393,7 +397,14 @@ type fcDiskUnmapper struct {
 
 var _ volume.BlockVolumeUnmapper = &fcDiskUnmapper{}
 
-func (c *fcDiskUnmapper) TearDownDevice() error {
+func (c *fcDiskUnmapper) TearDownDevice(_, devicePath string) error {
+	// Remove scsi device from the node.
+	if !strings.HasPrefix(devicePath, "/dev/") {
+		return fmt.Errorf("fc detach disk: invalid device name: %s", devicePath)
+	}
+	arr := strings.Split(devicePath, "/")
+	dev := arr[len(arr)-1]
+	removeFromScsiSubsystem(dev, c.io)
 	return nil
 }
 
