@@ -221,11 +221,11 @@ type BlockVolumePlugin interface {
 	// - podUID: The UID of the enclosing pod
 	NewBlockVolumeUnmapper(name string, podUID types.UID) (BlockVolumeUnmapper, error)
 	// ConstructBlockVolumeSpec constructs a volume spec based on the given
-	// pod name, volume name and a pod device map path.
+	// podUID, volume name and a pod device map path.
 	// The spec may have incomplete information due to limited information
 	// from input. This function is used by volume manager to reconstruct
 	// volume spec by reading the volume directories from disk.
-	ConstructBlockVolumeSpec(podName, volumeName, mountPath string) (*Spec, error)
+	ConstructBlockVolumeSpec(podUID types.UID, volumeName, mountPath string) (*Spec, error)
 }
 
 // VolumeHost is an interface that plugins can use to access the kubelet.

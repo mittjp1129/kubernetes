@@ -396,7 +396,7 @@ func (plugin *FakeVolumePlugin) ConstructVolumeSpec(volumeName, mountPath string
 }
 
 // Block volume support
-func (plugin *FakeVolumePlugin) ConstructBlockVolumeSpec(podName, volumeName, mountPath string) (*Spec, error) {
+func (plugin *FakeVolumePlugin) ConstructBlockVolumeSpec(podUID types.UID, volumeName, mountPath string) (*Spec, error) {
 	return &Spec{
 		Volume: &v1.Volume{
 			Name: volumeName,
@@ -541,7 +541,7 @@ func (fv *FakeVolume) GetPodDeviceMapPathCallCount() int {
 }
 
 // Block volume support
-func (fv *FakeVolume) TearDownDevice() error {
+func (fv *FakeVolume) TearDownDevice(mapPath string, devicePath string) error {
 	fv.Lock()
 	defer fv.Unlock()
 	fv.TearDownDeviceCallCount++
@@ -682,8 +682,6 @@ func NewBlockVolumePathHandler() util.BlockVolumePathHandler {
 
 type FakeVolumePathHandler struct {
 	sync.RWMutex
-	//MapDeviceCallCount   int
-	//UnmapDeviceCallCount int
 }
 
 func (fv *FakeVolumePathHandler) MapDevice(devicePath string, mapDir string, linkName string) error {
@@ -703,7 +701,7 @@ func (fv *FakeVolumePathHandler) RemoveMapPath(mapPath string) error {
 
 func (fv *FakeVolumePathHandler) IsSymlinkExist(mapPath string) (bool, error) {
 	// nil is success, else error
-	return false, nil
+	return true, nil
 }
 
 func (fv *FakeVolumePathHandler) GetDeviceSymlinkRefs(devPath string, mapPath string) ([]string, error) {
@@ -711,22 +709,22 @@ func (fv *FakeVolumePathHandler) GetDeviceSymlinkRefs(devPath string, mapPath st
 	return []string{}, nil
 }
 
-func (fv *FakeVolumePathHandler) FindGlobalMapPathFromPod(pluginDir, podName, mapPath string) (string, error) {
+func (fv *FakeVolumePathHandler) FindGlobalMapPathFromPod(pluginDir, mapPath string, podUID types.UID) (string, error) {
 	// nil is success, else error
 	return "", nil
 }
 
-func (fv *FakeVolumePathHandler) AttachFileDevice(path string, exec mount.Exec) (string, error) {
+func (fv *FakeVolumePathHandler) AttachFileDevice(path string) (string, error) {
 	// nil is success, else error
 	return "", nil
 }
 
-func (fv *FakeVolumePathHandler) GetLoopDevice(path string, exec mount.Exec) (string, error) {
+func (fv *FakeVolumePathHandler) GetLoopDevice(path string) (string, error) {
 	// nil is success, else error
 	return "/dev/loop1", nil
 }
 
-func (fv *FakeVolumePathHandler) RemoveLoopDevice(device string, exec mount.Exec) error {
+func (fv *FakeVolumePathHandler) RemoveLoopDevice(device string) error {
 	// nil is success, else error
 	return nil
 }
@@ -992,7 +990,7 @@ func VerifyZeroTearDownDeviceCallCount(fakeVolumePlugin *FakeVolumePlugin) error
 		actualCallCount := unmapper.GetTearDownDeviceCallCount()
 		if actualCallCount != 0 {
 			return fmt.Errorf(
-				"At least one mapper has non-zero TearDownDeviceCallCount: <%v>.",
+				"At least one unmapper has non-zero TearDownDeviceCallCount: <%v>.",
 				actualCallCount)
 		}
 	}

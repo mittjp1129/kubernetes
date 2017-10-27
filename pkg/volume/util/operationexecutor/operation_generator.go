@@ -56,7 +56,8 @@ type operationGenerator struct {
 	// which verifies that the components (binaries, etc.) required to mount
 	// the volume are available on the underlying node before attempting mount.
 	checkNodeCapabilitiesBeforeMount bool
-	//
+
+	// blkUtil provides volume path related operations for block volume
 	blkUtil util.BlockVolumePathHandler
 }
 
@@ -742,8 +743,7 @@ func (og *operationGenerator) GenerateMapVolumeFunc(
 		// that the block device is silently removed and attached another device with same name.
 		// Container runtime can't handler this problem. To avoid unexpected condition fd lock
 		// for the block device is required.
-		exec := og.volumePluginMgr.Host.GetExec(blockVolumePlugin.GetPluginName())
-		_, err = og.blkUtil.AttachFileDevice(devicePath, exec)
+		_, err = og.blkUtil.AttachFileDevice(devicePath)
 		if err != nil {
 			return volumeToMount.GenerateErrorDetailed("MapVolume.AttachFileDevice failed", err)
 		}
@@ -886,21 +886,14 @@ func (og *operationGenerator) GenerateUnmapDeviceFunc(
 			err = fmt.Errorf("The device %q is still referenced from other Pods %v", globalMapPath, refs)
 			return deviceToDetach.GenerateErrorDetailed("UnmapDevice failed", err)
 		}
-		// The globalMapPath directory is empty. Remove the directory
-		removeMapPathErr := og.blkUtil.RemoveMapPath(globalMapPath)
-		if removeMapPathErr != nil {
-			// On failure, return error. Caller will log and retry.
-			return deviceToDetach.GenerateErrorDetailed("UnmapDevice failed", removeMapPathErr)
-		}
 
 		// The block volume is not referenced from Pods. Release file descriptor lock.
 		glog.V(5).Infof("UnmapDevice: deviceToDetach.DevicePath: %v", deviceToDetach.DevicePath)
-		exec := og.volumePluginMgr.Host.GetExec(blockVolumePlugin.GetPluginName())
-		loopPath, err := og.blkUtil.GetLoopDevice(deviceToDetach.DevicePath, exec)
+		loopPath, err := og.blkUtil.GetLoopDevice(deviceToDetach.DevicePath)
 		if err != nil {
 			glog.Warningf(deviceToDetach.GenerateMsgDetailed("UnmapDevice: Couldn't find loopback device which takes file descriptor lock", fmt.Sprintf("device path: %q", deviceToDetach.DevicePath)))
 		} else {
-			err = og.blkUtil.RemoveLoopDevice(loopPath, exec)
+			err = og.blkUtil.RemoveLoopDevice(loopPath)
 			if err != nil {
 				return deviceToDetach.GenerateErrorDetailed("UnmapDevice.AttachFileDevice failed", err)
 			}
@@ -922,10 +915,17 @@ func (og *operationGenerator) GenerateUnmapDeviceFunc(
 		}
 
 		// Execute tear down device
-		unmapErr := blockVolumeUnmapper.TearDownDevice()
+		unmapErr := blockVolumeUnmapper.TearDownDevice(globalMapPath, deviceToDetach.DevicePath)
 		if unmapErr != nil {
 			// On failure, return error. Caller will log and retry.
 			return deviceToDetach.GenerateErrorDetailed("UnmapDevice.TearDownDevice failed", unmapErr)
+		}
+
+		// Plugin finished TearDownDevice(). Now globalMapPath is unnecessary, clean up it.
+		removeMapPathErr := og.blkUtil.RemoveMapPath(globalMapPath)
+		if removeMapPathErr != nil {
+			// On failure, return error. Caller will log and retry.
+			return deviceToDetach.GenerateErrorDetailed("UnmapDevice failed", removeMapPathErr)
 		}
 
 		glog.Infof(deviceToDetach.GenerateMsgDetailed("UnmapDevice succeeded", ""))

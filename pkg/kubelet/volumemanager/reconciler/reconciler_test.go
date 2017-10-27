@@ -433,7 +433,8 @@ func Test_Run_Positive_VolumeUnmountControllerAttachEnabled(t *testing.T) {
 
 // Populates desiredStateOfWorld cache with one volume/pod.
 // Calls Run()
-// Verifies there is are attach/map/etc calls and no detach/unmap calls.
+// Verifies there are attach/get map paths/setupDevice calls and
+// no detach/teardownDevice calls.
 func Test_Run_Positive_VolumeAttachAndMap(t *testing.T) {
 	// Arrange
 	volumePluginMgr, fakePlugin := volumetesting.GetTestVolumePluginMgr(t)
@@ -518,8 +519,10 @@ func Test_Run_Positive_VolumeAttachAndMap(t *testing.T) {
 		1 /* expectedWaitForAttachCallCount */, fakePlugin))
 	assert.NoError(t, volumetesting.VerifyGetGlobalMapPathCallCount(
 		1 /* expectedGetGlobalMapPathCallCount */, fakePlugin))
+	assert.NoError(t, volumetesting.VerifyGetPodDeviceMapPathCallCount(
+		1 /* expectedPodDeviceMapPathCallCount */, fakePlugin))
 	assert.NoError(t, volumetesting.VerifySetUpDeviceCallCount(
-		1 /* expectedSetUpCallCount */, fakePlugin))
+		1 /* expectedSetUpDeviceCallCount */, fakePlugin))
 	assert.NoError(t, volumetesting.VerifyZeroTearDownDeviceCallCount(fakePlugin))
 	assert.NoError(t, volumetesting.VerifyZeroDetachCallCount(fakePlugin))
 }
@@ -527,7 +530,8 @@ func Test_Run_Positive_VolumeAttachAndMap(t *testing.T) {
 // Populates desiredStateOfWorld cache with one volume/pod.
 // Enables controllerAttachDetachEnabled.
 // Calls Run()
-// Verifies there is one map call and no unmount calls.
+// Verifies there are two get map path calls, a setupDevice call
+// and no teardownDevice call.
 // Verifies there are no attach/detach calls.
 func Test_Run_Positive_BlockVolumeMapControllerAttachEnabled(t *testing.T) {
 	// Arrange
@@ -614,6 +618,8 @@ func Test_Run_Positive_BlockVolumeMapControllerAttachEnabled(t *testing.T) {
 		1 /* expectedWaitForAttachCallCount */, fakePlugin))
 	assert.NoError(t, volumetesting.VerifyGetGlobalMapPathCallCount(
 		1 /* expectedGetGlobalMapPathCallCount */, fakePlugin))
+	assert.NoError(t, volumetesting.VerifyGetPodDeviceMapPathCallCount(
+		1 /* expectedPodDeviceMapPathCallCount */, fakePlugin))
 	assert.NoError(t, volumetesting.VerifySetUpDeviceCallCount(
 		1 /* expectedSetUpCallCount */, fakePlugin))
 	assert.NoError(t, volumetesting.VerifyZeroTearDownDeviceCallCount(fakePlugin))
@@ -622,9 +628,10 @@ func Test_Run_Positive_BlockVolumeMapControllerAttachEnabled(t *testing.T) {
 
 // Populates desiredStateOfWorld cache with one volume/pod.
 // Calls Run()
-// Verifies there is one attach/map/etc call and no detach calls.
+// Verifies there is one attach call, two get map path calls,
+// setupDevice call and no detach calls.
 // Deletes volume/pod from desired state of world.
-// Verifies one detach/unmap calls are issued.
+// Verifies one detach/teardownDevice calls are issued.
 func Test_Run_Positive_BlockVolumeAttachMapUnmapDetach(t *testing.T) {
 	// Arrange
 	volumePluginMgr, fakePlugin := volumetesting.GetTestVolumePluginMgr(t)
@@ -709,6 +716,8 @@ func Test_Run_Positive_BlockVolumeAttachMapUnmapDetach(t *testing.T) {
 		1 /* expectedWaitForAttachCallCount */, fakePlugin))
 	assert.NoError(t, volumetesting.VerifyGetGlobalMapPathCallCount(
 		1 /* expectedGetGlobalMapPathCallCount */, fakePlugin))
+	assert.NoError(t, volumetesting.VerifyGetPodDeviceMapPathCallCount(
+		1 /* expectedPodDeviceMapPathCallCount */, fakePlugin))
 	assert.NoError(t, volumetesting.VerifySetUpDeviceCallCount(
 		1 /* expectedSetUpCallCount */, fakePlugin))
 	assert.NoError(t, volumetesting.VerifyZeroTearDownDeviceCallCount(fakePlugin))
@@ -728,9 +737,9 @@ func Test_Run_Positive_BlockVolumeAttachMapUnmapDetach(t *testing.T) {
 // Populates desiredStateOfWorld cache with one volume/pod.
 // Enables controllerAttachDetachEnabled.
 // Calls Run()
-// Verifies one map call is made and no unmap calls.
+// Verifies two map path calls are made and no teardownDevice/detach calls.
 // Deletes volume/pod from desired state of world.
-// Verifies one unmap call is made.
+// Verifies one teardownDevice call is made.
 // Verifies there are no attach/detach calls made.
 func Test_Run_Positive_VolumeUnmapControllerAttachEnabled(t *testing.T) {
 	// Arrange
@@ -818,6 +827,8 @@ func Test_Run_Positive_VolumeUnmapControllerAttachEnabled(t *testing.T) {
 		1 /* expectedWaitForAttachCallCount */, fakePlugin))
 	assert.NoError(t, volumetesting.VerifyGetGlobalMapPathCallCount(
 		1 /* expectedGetGlobalMapPathCallCount */, fakePlugin))
+	assert.NoError(t, volumetesting.VerifyGetPodDeviceMapPathCallCount(
+		1 /* expectedPodDeviceMapPathCallCount */, fakePlugin))
 	assert.NoError(t, volumetesting.VerifySetUpDeviceCallCount(
 		1 /* expectedSetUpCallCount */, fakePlugin))
 	assert.NoError(t, volumetesting.VerifyZeroTearDownDeviceCallCount(fakePlugin))

@@ -37,12 +37,11 @@ type Volume interface {
 	MetricsProvider
 }
 
-// BlockVolume represents a directory used by pods or hosts on a node.
-// This interface provides methods to generate global map path and
-// pod device map path.
+// BlockVolume interface provides methods to generate global map path
+// and pod device map path.
 type BlockVolume interface {
 	// GetGlobalMapPath returns a global map path which contains
-	// a symbolic links associated to a block device.
+	// symbolic links associated to a block device.
 	// ex. plugins/kubernetes.io/{PluginName}/{DefaultKubeletVolumeDevicesDirName}/{volumePluginDependentPath}/{pod uuid}
 	GetGlobalMapPath(spec *Spec) (string, error)
 	// GetPodDeviceMapPath returns a pod device map path
@@ -153,9 +152,13 @@ type BlockVolumeMapper interface {
 	// which may or may not exist yet and returns combination of physical
 	// device path of a block volume and error.
 	// If the plugin is non-attachable, it should prepare the device
-	// in /dev/ (or where appropriate) and return device path.
-	// If the plugin is attachable, it should not do anything, just return
-	// empty string for device path.
+	// in /dev/ (or where appropriate) and return unique device path.
+	// Unique device path across kubelet node reboot is required to avoid
+	// unexpected block volume destruction.
+	// If the plugin is attachable, it should not do anything here,
+	// just return empty string for device path.
+	// Instead, attachable plugin have to return unique device path
+	// at attacher.Attach() and attacher.WaitForAttach().
 	// This may be called more than once, so implementations must be idempotent.
 	SetUpDevice() (string, error)
 }
@@ -167,7 +170,7 @@ type BlockVolumeUnmapper interface {
 	// a self-determined directory.
 	// If the plugin is non-attachable, this method detaches the volume
 	// from a node.
-	TearDownDevice() error
+	TearDownDevice(mapPath string, devicePath string) error
 }
 
 // Provisioner is an interface that creates templates for PersistentVolumes
