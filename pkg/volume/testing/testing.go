@@ -709,7 +709,7 @@ func (fv *FakeVolumePathHandler) GetDeviceSymlinkRefs(devPath string, mapPath st
 	return []string{}, nil
 }
 
-func (fv *FakeVolumePathHandler) FindGlobalMapPathFromPod(pluginDir, mapPath string, podUID types.UID) (string, error) {
+func (fv *FakeVolumePathHandler) FindGlobalMapPathUUIDFromPod(pluginDir, mapPath string, podUID types.UID) (string, error) {
 	// nil is success, else error
 	return "", nil
 }

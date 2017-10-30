@@ -293,9 +293,9 @@ type BlockVolumePathHandler interface {
 	IsSymlinkExist(mapPath string) (bool, error)
 	// GetDeviceSymlinkRefs searches symbolic links under global map path
 	GetDeviceSymlinkRefs(devPath string, mapPath string) ([]string, error)
-	// FindGlobalMapPathFromPod finds corresponding symbolic link of
-	// globalMapPath under plugin dir using pod name, pod device map path.
-	FindGlobalMapPathFromPod(pluginDir, mapPath string, podUID types.UID) (string, error)
+	// FindGlobalMapPathUUIDFromPod finds {pod uuid} symbolic link under globalMapPath
+	// corresponding to map path symlink, and then return global map path with pod uuid.
+	FindGlobalMapPathUUIDFromPod(pluginDir, mapPath string, podUID types.UID) (string, error)
 	// AttachFileDevice takes a path to a regular file and makes it available as an
 	// attached block device.
 	AttachFileDevice(path string) (string, error)
@@ -318,11 +318,11 @@ type VolumePathHandler struct {
 // MapDevice creates a symbolic link to block device under specified map path
 func (v VolumePathHandler) MapDevice(devicePath string, mapPath string, linkName string) error {
 	// Example of global map path:
-	//   mapPath: plugins/kubernetes.io/{PluginName}/{DefaultKubeletVolumeDevicesDirName}/{volumePluginDependentPath}
+	//   globalMapPath/linkName: plugins/kubernetes.io/{PluginName}/{DefaultKubeletVolumeDevicesDirName}/{volumePluginDependentPath}/{podUid}
 	//   linkName: {podUid}
 	//
 	// Example of pod device map path:
-	//   mapPath: pods/{podUid}/{DefaultKubeletVolumeDevicesDirName}/{escapeQualifiedPluginName}
+	//   podDeviceMapPath/linkName: pods/{podUid}/{DefaultKubeletVolumeDevicesDirName}/{escapeQualifiedPluginName}/{volumeName}
 	//   linkName: {volumeName}
 	if len(devicePath) == 0 {
 		return fmt.Errorf("Failed to map device to map path. devicePath is empty")
@@ -436,12 +436,12 @@ func (v VolumePathHandler) GetDeviceSymlinkRefs(devPath string, mapPath string) 
 	return refs, nil
 }
 
-// FindGlobalMapPathFromPod finds corresponding symbolic link of globalMapPath
-// under plugin dir using podUID and pod device map path.
-// ex. device map Path: pods/{podUid}}/{DefaultKubeletVolumeDevicesDirName}/{escapeQualifiedPluginName}/{volumeName}
-//     global map path: plugins/kubernetes.io/{PluginName}/{DefaultKubeletVolumeDevicesDirName}/{volumePluginDependentPath}/{pod uuid}
-func (v VolumePathHandler) FindGlobalMapPathFromPod(pluginDir, mapPath string, podUID types.UID) (string, error) {
-	var globalMapPath string
+// FindGlobalMapPathUUIDFromPod finds {pod uuid} symbolic link under globalMapPath
+// corresponding to map path symlink, and then return global map path with pod uuid.
+// ex. mapPath symlink: pods/{podUid}}/{DefaultKubeletVolumeDevicesDirName}/{escapeQualifiedPluginName}/{volumeName} -> /dev/sdX
+//     globalMapPath/{pod uuid}: plugins/kubernetes.io/{PluginName}/{DefaultKubeletVolumeDevicesDirName}/{volumePluginDependentPath}/{pod uuid} -> /dev/sdX
+func (v VolumePathHandler) FindGlobalMapPathUUIDFromPod(pluginDir, mapPath string, podUID types.UID) (string, error) {
+	var globalMapPathUUID string
 	// Find symbolic link named pod uuid under plugin dir
 	err := filepath.Walk(pluginDir, func(path string, fi os.FileInfo, err error) error {
 		if err != nil {
@@ -450,7 +450,7 @@ func (v VolumePathHandler) FindGlobalMapPathFromPod(pluginDir, mapPath string, p
 		if (fi.Mode()&os.ModeSymlink == os.ModeSymlink) && (fi.Name() == string(podUID)) {
 			glog.V(5).Infof("FindGlobalMapPathFromPod: path %s, mapPath %s", path, mapPath)
 			if res, err := compareSymlinks(path, mapPath); err == nil && res {
-				globalMapPath = path
+				globalMapPathUUID = path
 			}
 		}
 		return nil
@@ -458,8 +458,9 @@ func (v VolumePathHandler) FindGlobalMapPathFromPod(pluginDir, mapPath string, p
 	if err != nil {
 		return "", err
 	}
-	glog.V(5).Infof("FindGlobalMapPathFromPod: globalMapPath %s", globalMapPath)
-	return globalMapPath, nil
+	glog.V(5).Infof("FindGlobalMapPathFromPod: globalMapPathUUID %s", globalMapPathUUID)
+	// Return path contains global map path + {pod uuid}
+	return globalMapPathUUID, nil
 }
 
 func compareSymlinks(global, pod string) (bool, error) {

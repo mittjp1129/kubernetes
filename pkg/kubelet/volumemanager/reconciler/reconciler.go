@@ -436,6 +436,16 @@ func (rc *reconciler) reconstructVolume(volume podVolume) (*reconstructedVolume,
 
 	var volumeSpec *volumepkg.Spec
 	if volume.volumeMode == v1.PersistentVolumeBlock {
+		if mapperPlugin == nil {
+			return nil, fmt.Errorf("Could not find block volume plugin %q (spec.Name: %q) pod %q (UID: %q)",
+				volume.pluginName,
+				volume.volumeSpecName,
+				volume.podName,
+				pod.UID)
+		}
+		// mountPath contains volumeName on the path. In the case of block volume, {volumeName} is symbolic link
+		// corresponding to raw block device.
+		// ex. mountPath: pods/{podUid}}/{DefaultKubeletVolumeDevicesDirName}/{escapeQualifiedPluginName}/{volumeName}
 		volumeSpec, err = mapperPlugin.ConstructBlockVolumeSpec(types.UID(volume.podName), volume.volumeSpecName, volume.mountPath)
 	} else {
 		volumeSpec, err = plugin.ConstructVolumeSpec(volume.volumeSpecName, volume.mountPath)
@@ -469,7 +479,7 @@ func (rc *reconciler) reconstructVolume(volume podVolume) (*reconstructedVolume,
 		}
 	} else if volume.volumeMode == v1.PersistentVolumeBlock {
 		blkutil := volumeutil.NewBlockVolumePathHandler()
-		if islinkExist, checkErr = blkutil.IsSymlinkExist(path.Join(volume.mountPath, string(pod.UID))); checkErr != nil {
+		if islinkExist, checkErr = blkutil.IsSymlinkExist(volume.mountPath); checkErr != nil {
 			return nil, fmt.Errorf("Could not check whether the block volume %q (spec.Name: %q) pod %q (UID: %q) is mapped to: %v",
 				uniqueVolumeName,
 				volumeSpec.Name(),

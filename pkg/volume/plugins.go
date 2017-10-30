@@ -705,7 +705,7 @@ func (pm *VolumePluginMgr) FindExpandablePluginByName(name string) (ExpandableVo
 	return nil, nil
 }
 
-//
+// FindMapperPluginBySpec fetches a block volume plugin by spec.
 func (pm *VolumePluginMgr) FindMapperPluginBySpec(spec *Spec) (BlockVolumePlugin, error) {
 	volumePlugin, err := pm.FindPluginBySpec(spec)
 	if err != nil {
@@ -718,7 +718,7 @@ func (pm *VolumePluginMgr) FindMapperPluginBySpec(spec *Spec) (BlockVolumePlugin
 	return nil, nil
 }
 
-//
+// FindMapperPluginBySpec fetches a block volume plugin by name.
 func (pm *VolumePluginMgr) FindMapperPluginByName(name string) (BlockVolumePlugin, error) {
 	volumePlugin, err := pm.FindPluginByName(name)
 	if err != nil {
