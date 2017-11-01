@@ -129,8 +129,13 @@ func (kl *Kubelet) makeBlockVolumes(pod *v1.Pod, container *v1.Container, podVol
 		if islinkExist, checkErr := blkutil.IsSymlinkExist(symlinkPath); checkErr != nil {
 			return nil, checkErr
 		} else if islinkExist {
+			// Check readOnly in PVCVolumeSource and set read only permission if it's true.
+			permission := "mrw"
+			if vol.ReadOnly {
+				permission = "r"
+			}
 			glog.V(4).Infof("Device will be attached to container %q. Path on host: %v", container.Name, symlinkPath)
-			devices = append(devices, kubecontainer.DeviceInfo{PathOnHost: symlinkPath, PathInContainer: device.DevicePath, Permissions: "mrw"})
+			devices = append(devices, kubecontainer.DeviceInfo{PathOnHost: symlinkPath, PathInContainer: device.DevicePath, Permissions: permission})
 		}
 	}
 
