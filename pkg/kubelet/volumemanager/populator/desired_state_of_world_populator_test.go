@@ -22,7 +22,9 @@ import (
 
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	core "k8s.io/client-go/testing"
 	"k8s.io/kubernetes/pkg/kubelet/configmap"
 	containertest "k8s.io/kubernetes/pkg/kubelet/container/testing"
 	kubepod "k8s.io/kubernetes/pkg/kubelet/pod"
@@ -161,6 +163,31 @@ func TestFindAndAddNewPods_FindAndRemoveDeletedPods(t *testing.T) {
 func TestBlockVolume_FindAndAddNewPods_FindAndRemoveDeletedPods(t *testing.T) {
 	fakeVolumePluginMgr, _ := volumetesting.GetTestVolumePluginMgr(t)
 	fakeClient := &fake.Clientset{}
+	mode := v1.PersistentVolumeBlock
+	pv := &v1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "dswp-test-volume-name",
+		},
+		Spec: v1.PersistentVolumeSpec{
+			ClaimRef: &v1.ObjectReference{Namespace: "ns", Name: "block-bound"},
+		},
+	}
+	pvc := &v1.PersistentVolumeClaim{
+		Spec: v1.PersistentVolumeClaimSpec{
+			VolumeName: "dswp-test-volume-name",
+			VolumeMode: &mode,
+		},
+		Status: v1.PersistentVolumeClaimStatus{
+			Phase: v1.ClaimBound,
+		},
+	}
+
+	fakeClient.AddReactor("get", "persistentvolumeclaims", func(action core.Action) (bool, runtime.Object, error) {
+		return true, pvc, nil
+	})
+	fakeClient.AddReactor("get", "persistentvolumes", func(action core.Action) (bool, runtime.Object, error) {
+		return true, pv, nil
+	})
 
 	fakeSecretManager := secret.NewFakeManager()
 	fakeConfigMapManager := configmap.NewFakeManager()
@@ -194,26 +221,13 @@ func TestBlockVolume_FindAndAddNewPods_FindAndRemoveDeletedPods(t *testing.T) {
 		Spec: v1.PodSpec{
 			Volumes: []v1.Volume{
 				{
-					Name: "dswp-test-volume-name1",
+					Name: "dswp-test-volume-name",
 					VolumeSource: v1.VolumeSource{
 						GCEPersistentDisk: &v1.GCEPersistentDiskVolumeSource{
-							PDName: "dswp-test-fake-device1",
+							PDName: "dswp-test-fake-device",
 						},
-					},
-				},
-				{
-					Name: "dswp-test-volume-name2",
-					VolumeSource: v1.VolumeSource{
-						GCEPersistentDisk: &v1.GCEPersistentDiskVolumeSource{
-							PDName: "dswp-test-fake-device2",
-						},
-					},
-				},
-				{
-					Name: "dswp-test-volume-name3",
-					VolumeSource: v1.VolumeSource{
-						GCEPersistentDisk: &v1.GCEPersistentDiskVolumeSource{
-							PDName: "dswp-test-fake-device3",
+						PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
+							ClaimName: "block-bound",
 						},
 					},
 				},
@@ -222,16 +236,8 @@ func TestBlockVolume_FindAndAddNewPods_FindAndRemoveDeletedPods(t *testing.T) {
 				{
 					VolumeDevices: []v1.VolumeDevice{
 						{
-							Name:       "dswp-test-volume-name1",
+							Name:       "dswp-test-volume-name",
 							DevicePath: "/dev/sdb",
-						},
-						{
-							Name:       "dswp-test-volume-name2",
-							DevicePath: "/dev/sdc",
-						},
-						{
-							Name:       "dswp-test-volume-name3",
-							DevicePath: "/dev/sdz",
 						},
 					},
 				},
@@ -312,6 +318,302 @@ func TestBlockVolume_FindAndAddNewPods_FindAndRemoveDeletedPods(t *testing.T) {
 		}
 	}
 
+}
+
+func TestBlockVolume_createVolumeSpec_valid_file_volumeMounts(t *testing.T) {
+	fakeVolumePluginMgr, _ := volumetesting.GetTestVolumePluginMgr(t)
+	fakeClient := &fake.Clientset{}
+	mode := v1.PersistentVolumeFilesystem
+	pv := &v1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "dswp-test-volume-name",
+		},
+		Spec: v1.PersistentVolumeSpec{
+			ClaimRef: &v1.ObjectReference{Namespace: "ns", Name: "file-bound"},
+		},
+	}
+	pvc := &v1.PersistentVolumeClaim{
+		Spec: v1.PersistentVolumeClaimSpec{
+			VolumeName: "dswp-test-volume-name",
+			VolumeMode: &mode,
+		},
+		Status: v1.PersistentVolumeClaimStatus{
+			Phase: v1.ClaimBound,
+		},
+	}
+
+	fakeClient.AddReactor("get", "persistentvolumeclaims", func(action core.Action) (bool, runtime.Object, error) {
+		return true, pvc, nil
+	})
+	fakeClient.AddReactor("get", "persistentvolumes", func(action core.Action) (bool, runtime.Object, error) {
+		return true, pv, nil
+	})
+
+	fakeSecretManager := secret.NewFakeManager()
+	fakeConfigMapManager := configmap.NewFakeManager()
+	fakePodManager := kubepod.NewBasicPodManager(
+		podtest.NewFakeMirrorClient(), fakeSecretManager, fakeConfigMapManager)
+
+	fakesDSW := cache.NewDesiredStateOfWorld(fakeVolumePluginMgr)
+	fakeRuntime := &containertest.FakeRuntime{}
+
+	fakeStatusManager := status.NewManager(fakeClient, fakePodManager, &statustest.FakePodDeletionSafetyProvider{})
+
+	dswp := &desiredStateOfWorldPopulator{
+		kubeClient:                fakeClient,
+		loopSleepDuration:         100 * time.Millisecond,
+		getPodStatusRetryDuration: 2 * time.Second,
+		podManager:                fakePodManager,
+		podStatusProvider:         fakeStatusManager,
+		desiredStateOfWorld:       fakesDSW,
+		pods: processedPods{
+			processedPods: make(map[types.UniquePodName]bool)},
+		kubeContainerRuntime:     fakeRuntime,
+		keepTerminatedPodVolumes: false,
+	}
+
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "dswp-test-pod",
+			UID:       "dswp-test-pod-uid",
+			Namespace: "dswp-test",
+		},
+		Spec: v1.PodSpec{
+			Volumes: []v1.Volume{
+				{
+					Name: "dswp-test-volume-name",
+					VolumeSource: v1.VolumeSource{
+						GCEPersistentDisk: &v1.GCEPersistentDiskVolumeSource{
+							PDName: "dswp-test-fake-device",
+						},
+						PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
+							ClaimName: "file-bound",
+						},
+					},
+				},
+			},
+			Containers: []v1.Container{
+				{
+					VolumeMounts: []v1.VolumeMount{
+						{
+							Name:      "dswp-test-volume-name",
+							MountPath: "/mnt",
+						},
+					},
+				},
+			},
+		},
+		Status: v1.PodStatus{
+			Phase: v1.PodPhase("Running"),
+		},
+	}
+
+	fakePodManager.AddPod(pod)
+	volumeDevicesMap := dswp.makeVolumeDevicesMap(pod.Spec.Containers)
+	volumeSpec, _, err :=
+		dswp.createVolumeSpec(pod.Spec.Volumes[0], pod.Name, pod.Namespace, volumeDevicesMap)
+
+	// Assert
+	if volumeSpec == nil || err != nil {
+		t.Fatalf("Failed to create volumeSpec with combination of filesystem mode and volumeMounts. err: %v", err)
+	}
+}
+func TestBlockVolume_createVolumeSpec_invalid_file_volumeDevices(t *testing.T) {
+	fakeVolumePluginMgr, _ := volumetesting.GetTestVolumePluginMgr(t)
+	fakeClient := &fake.Clientset{}
+	mode := v1.PersistentVolumeFilesystem
+	pv := &v1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "dswp-test-volume-name",
+		},
+		Spec: v1.PersistentVolumeSpec{
+			ClaimRef: &v1.ObjectReference{Namespace: "ns", Name: "file-bound"},
+		},
+	}
+	pvc := &v1.PersistentVolumeClaim{
+		Spec: v1.PersistentVolumeClaimSpec{
+			VolumeName: "dswp-test-volume-name",
+			VolumeMode: &mode,
+		},
+		Status: v1.PersistentVolumeClaimStatus{
+			Phase: v1.ClaimBound,
+		},
+	}
+
+	fakeClient.AddReactor("get", "persistentvolumeclaims", func(action core.Action) (bool, runtime.Object, error) {
+		return true, pvc, nil
+	})
+	fakeClient.AddReactor("get", "persistentvolumes", func(action core.Action) (bool, runtime.Object, error) {
+		return true, pv, nil
+	})
+
+	fakeSecretManager := secret.NewFakeManager()
+	fakeConfigMapManager := configmap.NewFakeManager()
+	fakePodManager := kubepod.NewBasicPodManager(
+		podtest.NewFakeMirrorClient(), fakeSecretManager, fakeConfigMapManager)
+
+	fakesDSW := cache.NewDesiredStateOfWorld(fakeVolumePluginMgr)
+	fakeRuntime := &containertest.FakeRuntime{}
+
+	fakeStatusManager := status.NewManager(fakeClient, fakePodManager, &statustest.FakePodDeletionSafetyProvider{})
+
+	dswp := &desiredStateOfWorldPopulator{
+		kubeClient:                fakeClient,
+		loopSleepDuration:         100 * time.Millisecond,
+		getPodStatusRetryDuration: 2 * time.Second,
+		podManager:                fakePodManager,
+		podStatusProvider:         fakeStatusManager,
+		desiredStateOfWorld:       fakesDSW,
+		pods: processedPods{
+			processedPods: make(map[types.UniquePodName]bool)},
+		kubeContainerRuntime:     fakeRuntime,
+		keepTerminatedPodVolumes: false,
+	}
+
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "dswp-test-pod",
+			UID:       "dswp-test-pod-uid",
+			Namespace: "dswp-test",
+		},
+		Spec: v1.PodSpec{
+			Volumes: []v1.Volume{
+				{
+					Name: "dswp-test-volume-name1",
+					VolumeSource: v1.VolumeSource{
+						GCEPersistentDisk: &v1.GCEPersistentDiskVolumeSource{
+							PDName: "dswp-test-fake-device1",
+						},
+						PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
+							ClaimName: "file-bound:1",
+						},
+					},
+				},
+			},
+			Containers: []v1.Container{
+				{
+					VolumeDevices: []v1.VolumeDevice{
+						{
+							Name:       "dswp-test-volume-name1",
+							DevicePath: "/dev/sdb",
+						},
+					},
+				},
+			},
+		},
+		Status: v1.PodStatus{
+			Phase: v1.PodPhase("Running"),
+		},
+	}
+
+	fakePodManager.AddPod(pod)
+	volumeDevicesMap := dswp.makeVolumeDevicesMap(pod.Spec.Containers)
+	volumeSpec, _, err :=
+		dswp.createVolumeSpec(pod.Spec.Volumes[0], pod.Name, pod.Namespace, volumeDevicesMap)
+
+	// Assert
+	if volumeSpec != nil || err == nil {
+		t.Fatalf("Unexpected volumeMode and volumeMounts/volumeDevices combination is accepted")
+	}
+}
+
+func TestBlockVolume_createVolumeSpec_invalid_block_volumeMounts(t *testing.T) {
+	fakeVolumePluginMgr, _ := volumetesting.GetTestVolumePluginMgr(t)
+	fakeClient := &fake.Clientset{}
+	mode := v1.PersistentVolumeBlock
+	pv := &v1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "dswp-test-volume-name",
+		},
+		Spec: v1.PersistentVolumeSpec{
+			ClaimRef: &v1.ObjectReference{Namespace: "ns", Name: "block-bound"},
+		},
+	}
+	pvc := &v1.PersistentVolumeClaim{
+		Spec: v1.PersistentVolumeClaimSpec{
+			VolumeName: "dswp-test-volume-name",
+			VolumeMode: &mode,
+		},
+		Status: v1.PersistentVolumeClaimStatus{
+			Phase: v1.ClaimBound,
+		},
+	}
+
+	fakeClient.AddReactor("get", "persistentvolumeclaims", func(action core.Action) (bool, runtime.Object, error) {
+		return true, pvc, nil
+	})
+	fakeClient.AddReactor("get", "persistentvolumes", func(action core.Action) (bool, runtime.Object, error) {
+		return true, pv, nil
+	})
+
+	fakeSecretManager := secret.NewFakeManager()
+	fakeConfigMapManager := configmap.NewFakeManager()
+	fakePodManager := kubepod.NewBasicPodManager(
+		podtest.NewFakeMirrorClient(), fakeSecretManager, fakeConfigMapManager)
+
+	fakesDSW := cache.NewDesiredStateOfWorld(fakeVolumePluginMgr)
+	fakeRuntime := &containertest.FakeRuntime{}
+
+	fakeStatusManager := status.NewManager(fakeClient, fakePodManager, &statustest.FakePodDeletionSafetyProvider{})
+
+	dswp := &desiredStateOfWorldPopulator{
+		kubeClient:                fakeClient,
+		loopSleepDuration:         100 * time.Millisecond,
+		getPodStatusRetryDuration: 2 * time.Second,
+		podManager:                fakePodManager,
+		podStatusProvider:         fakeStatusManager,
+		desiredStateOfWorld:       fakesDSW,
+		pods: processedPods{
+			processedPods: make(map[types.UniquePodName]bool)},
+		kubeContainerRuntime:     fakeRuntime,
+		keepTerminatedPodVolumes: false,
+	}
+
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "dswp-test-pod",
+			UID:       "dswp-test-pod-uid",
+			Namespace: "dswp-test",
+		},
+		Spec: v1.PodSpec{
+			Volumes: []v1.Volume{
+				{
+					Name: "dswp-test-volume-name",
+					VolumeSource: v1.VolumeSource{
+						GCEPersistentDisk: &v1.GCEPersistentDiskVolumeSource{
+							PDName: "dswp-test-fake-device",
+						},
+						PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
+							ClaimName: "block-bound",
+						},
+					},
+				},
+			},
+			Containers: []v1.Container{
+				{
+					VolumeMounts: []v1.VolumeMount{
+						{
+							Name:      "dswp-test-volume-name",
+							MountPath: "/mnt",
+						},
+					},
+				},
+			},
+		},
+		Status: v1.PodStatus{
+			Phase: v1.PodPhase("Running"),
+		},
+	}
+
+	fakePodManager.AddPod(pod)
+	volumeDevicesMap := dswp.makeVolumeDevicesMap(pod.Spec.Containers)
+	volumeSpec, _, err :=
+		dswp.createVolumeSpec(pod.Spec.Volumes[0], pod.Name, pod.Namespace, volumeDevicesMap)
+
+	// Assert
+	if volumeSpec != nil || err == nil {
+		t.Fatalf("Unexpected volumeMode and volumeMounts/volumeDevices combination is accepted")
+	}
 }
 
 func verifyVolumeExistsInVolumesToMount(t *testing.T, expectedVolumeName v1.UniqueVolumeName, expectReportedInUse bool, dsw cache.DesiredStateOfWorld) {

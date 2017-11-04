@@ -529,7 +529,7 @@ type MountedVolume struct {
 	BlockVolumeMapper volume.BlockVolumeMapper
 
 	// VolumeStateHandler defines a set of operations for handling
-	// attached/detached/unmounted volume-related operations.
+	// attached/detached/unmounted/reconstruct volume-related operations.
 	VolumeHandler VolumeStateHandler
 
 	// VolumeGidValue contains the value of the GID annotation, if present.
@@ -845,7 +845,7 @@ func (oe *operationExecutor) VerifyControllerAttachedVolume(
 		volumeToMount.VolumeName, "" /* podName */, verifyControllerAttachedVolumeFunc, opCompleteFunc)
 }
 
-// VolumeStateHandler defines a set of operations for handling attached/detached/unmounted volume-related operations
+// VolumeStateHandler defines a set of operations for handling attached/detached/unmounted/reconstruct volume-related operations
 type VolumeStateHandler interface {
 	// Volume is attached, mount/map it
 	HandleAttachedMounted(waitForAttachTimeout time.Duration, volumeToMount VolumeToMount, actualStateOfWorld ActualStateOfWorldMounterUpdater, isRemount bool, remountingLogStr string) error
@@ -853,6 +853,8 @@ type VolumeStateHandler interface {
 	HandleUnmounted(mountedVolume MountedVolume, actualStateOfWorld ActualStateOfWorldMounterUpdater) error
 	// Volume is globally mounted/mapped to device, unmount/unmap it
 	HandleDetachedUnmounted(attachedVolume AttachedVolume, actualStateOfWorld ActualStateOfWorldMounterUpdater, mounter mount.Interface) error
+	// Reconstruct volume from mount path
+	ReconstructVolume(plugin volume.VolumePlugin, mapperPlugin volume.BlockVolumePlugin, uid types.UID, podName volumetypes.UniquePodName, volumeSpecName string, mountPath string, pluginName string) (*volume.Spec, error)
 }
 
 // NewVolumeHandler return a new instance of volumeHandler depens on a volumeMode
@@ -923,6 +925,17 @@ func (f FilesystemVolumeHandler) HandleDetachedUnmounted(attachedVolume Attached
 	return err
 }
 
+// ReconstructVolume create volumeSpec from mount path
+// This method is handler for filesystem volume
+func (f FilesystemVolumeHandler) ReconstructVolume(plugin volume.VolumePlugin, _ volume.BlockVolumePlugin, _ types.UID, _ volumetypes.UniquePodName, volumeSpecName string, mountPath string, _ string) (*volume.Spec, error) {
+	glog.V(12).Infof("Starting operationExecutor.ReconstructVolumepodName")
+	volumeSpec, err := plugin.ConstructVolumeSpec(volumeSpecName, mountPath)
+	if err != nil {
+		return nil, err
+	}
+	return volumeSpec, nil
+}
+
 // HandleAttachedMounted creates a map to device if a volume is attached
 // This method is handler for block volume
 func (b BlockVolumeHandler) HandleAttachedMounted(waitForAttachTimeout time.Duration, volumeToMount VolumeToMount, actualStateOfWorld ActualStateOfWorldMounterUpdater, _ bool, _ string) error {
@@ -953,6 +966,27 @@ func (b BlockVolumeHandler) HandleDetachedUnmounted(attachedVolume AttachedVolum
 		actualStateOfWorld,
 		mounter)
 	return err
+}
+
+// ReconstructVolume create volumeSpec from mount path
+// This method is handler for block volume
+func (b BlockVolumeHandler) ReconstructVolume(_ volume.VolumePlugin, mapperPlugin volume.BlockVolumePlugin, uid types.UID, podName volumetypes.UniquePodName, volumeSpecName string, mountPath string, pluginName string) (*volume.Spec, error) {
+	glog.V(12).Infof("Starting operationExecutor.ReconstructVolume")
+	if mapperPlugin == nil {
+		return nil, fmt.Errorf("Could not find block volume plugin %q (spec.Name: %q) pod %q (UID: %q)",
+			pluginName,
+			volumeSpecName,
+			podName,
+			uid)
+	}
+	// mountPath contains volumeName on the path. In the case of block volume, {volumeName} is symbolic link
+	// corresponding to raw block device.
+	// ex. mountPath: pods/{podUid}}/{DefaultKubeletVolumeDevicesDirName}/{escapeQualifiedPluginName}/{volumeName}
+	volumeSpec, err := mapperPlugin.ConstructBlockVolumeSpec(uid, volumeSpecName, mountPath)
+	if err != nil {
+		return nil, err
+	}
+	return volumeSpec, nil
 }
 
 // TODO: this is a workaround for the unmount device issue caused by gci mounter.

@@ -17,11 +17,9 @@ limitations under the License.
 package util
 
 import (
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -477,81 +475,4 @@ func compareSymlinks(global, pod string) (bool, error) {
 		return true, nil
 	}
 	return false, nil
-}
-
-// AttachFileDevice takes a path to a regular file and makes it available as an
-// attached block device.
-func (v VolumePathHandler) AttachFileDevice(path string) (string, error) {
-	blockDevicePath, err := v.GetLoopDevice(path)
-	if err != nil && err.Error() != ErrDeviceNotFound {
-		return "", err
-	}
-
-	// If no existing loop device for the path, create one
-	if blockDevicePath == "" {
-		glog.V(4).Infof("Creating device for path: %s", path)
-		blockDevicePath, err = makeLoopDevice(path)
-		if err != nil {
-			return "", err
-		}
-	}
-	return blockDevicePath, nil
-}
-
-// GetLoopDevice returns the full path to the loop device associated with the given path.
-func (v VolumePathHandler) GetLoopDevice(path string) (string, error) {
-	_, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		return "", errors.New(ErrNotAvailable)
-	}
-	if err != nil {
-		return "", fmt.Errorf("not attachable: %v", err)
-	}
-
-	args := []string{"-j", path}
-	cmd := exec.Command(losetupPath, args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		glog.V(2).Infof("Failed device discover command for path %s: %v", path, err)
-		return "", err
-	}
-	return parseLosetupOutputForDevice(out)
-}
-
-func makeLoopDevice(path string) (string, error) {
-	args := []string{"-f", "--show", path}
-	cmd := exec.Command(losetupPath, args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		glog.V(2).Infof("Failed device create command for path %s: %v", path, err)
-		return "", err
-	}
-	return parseLosetupOutputForDevice(out)
-}
-
-// RemoveLoopDevice removes specified loopback device
-func (v VolumePathHandler) RemoveLoopDevice(device string) error {
-	args := []string{"-d", device}
-	cmd := exec.Command(losetupPath, args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		if !strings.Contains(string(out), "No such device or address") {
-			return err
-		}
-	}
-	return nil
-}
-
-func parseLosetupOutputForDevice(output []byte) (string, error) {
-	if len(output) == 0 {
-		return "", errors.New(ErrDeviceNotFound)
-	}
-
-	// losetup returns device in the format:
-	// /dev/loop1: [0073]:148662 (/dev/sda)
-	device := strings.TrimSpace(strings.SplitN(string(output), ":", 2)[0])
-	if len(device) == 0 {
-		return "", errors.New(ErrDeviceNotFound)
-	}
-	return device, nil
 }

@@ -415,41 +415,42 @@ func (rc *reconciler) syncStates(podsDir string) {
 
 // Reconstruct Volume object and reconstructedVolume data structure by reading the pod's volume directories
 func (rc *reconciler) reconstructVolume(volume podVolume) (*reconstructedVolume, error) {
+	// plugin initializations
 	plugin, err := rc.volumePluginMgr.FindPluginByName(volume.pluginName)
 	if err != nil {
 		return nil, err
-	}
-	pod := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			UID: types.UID(volume.podName),
-		},
 	}
 	attachablePlugin, err := rc.volumePluginMgr.FindAttachablePluginByName(volume.pluginName)
 	if err != nil {
 		return nil, err
 	}
-
 	mapperPlugin, err := rc.volumePluginMgr.FindMapperPluginByName(volume.pluginName)
 	if err != nil {
 		return nil, err
 	}
 
-	var volumeSpec *volumepkg.Spec
-	if volume.volumeMode == v1.PersistentVolumeBlock {
-		if mapperPlugin == nil {
-			return nil, fmt.Errorf("Could not find block volume plugin %q (spec.Name: %q) pod %q (UID: %q)",
-				volume.pluginName,
-				volume.volumeSpecName,
-				volume.podName,
-				pod.UID)
-		}
-		// mountPath contains volumeName on the path. In the case of block volume, {volumeName} is symbolic link
-		// corresponding to raw block device.
-		// ex. mountPath: pods/{podUid}}/{DefaultKubeletVolumeDevicesDirName}/{escapeQualifiedPluginName}/{volumeName}
-		volumeSpec, err = mapperPlugin.ConstructBlockVolumeSpec(types.UID(volume.podName), volume.volumeSpecName, volume.mountPath)
-	} else {
-		volumeSpec, err = plugin.ConstructVolumeSpec(volume.volumeSpecName, volume.mountPath)
+	// Create volumeSpec
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID: types.UID(volume.podName),
+		},
 	}
+	tmpSpec := &volumepkg.Spec{
+		PersistentVolume: &v1.PersistentVolume{
+			Spec: v1.PersistentVolumeSpec{
+				VolumeMode: &volume.volumeMode,
+			},
+		},
+	}
+	volumeHandler := operationexecutor.NewVolumeHandler(tmpSpec, rc.operationExecutor)
+	volumeSpec, err := volumeHandler.ReconstructVolume(
+		plugin,
+		mapperPlugin,
+		pod.UID,
+		volume.podName,
+		volume.volumeSpecName,
+		volume.mountPath,
+		volume.pluginName)
 	if err != nil {
 		return nil, err
 	}

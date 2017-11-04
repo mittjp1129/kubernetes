@@ -261,7 +261,7 @@ func (dswp *desiredStateOfWorldPopulator) processPodVolumes(pod *v1.Pod) {
 	}
 
 	allVolumesAdded := true
-	volumeDevicesMap := makeVolumeDevicesMap(pod.Spec.Containers)
+	volumeDevicesMap := dswp.makeVolumeDevicesMap(pod.Spec.Containers)
 
 	// Process volume spec for each volume defined in pod
 	for _, podVolume := range pod.Spec.Volumes {
@@ -464,15 +464,7 @@ func (dswp *desiredStateOfWorldPopulator) getPVSpec(
 	return volume.NewSpecFromPersistentVolume(pv, pvcReadOnly), volumeGidValue, nil
 }
 
-func getPVVolumeGidAnnotationValue(pv *v1.PersistentVolume) string {
-	if volumeGid, ok := pv.Annotations[volumehelper.VolumeGidAnnotationKey]; ok {
-		return volumeGid
-	}
-
-	return ""
-}
-
-func makeVolumeDevicesMap(containers []v1.Container) map[string]bool {
+func (dswp *desiredStateOfWorldPopulator) makeVolumeDevicesMap(containers []v1.Container) map[string]bool {
 	volumeDevicesMap := make(map[string]bool)
 
 	for _, container := range containers {
@@ -485,4 +477,12 @@ func makeVolumeDevicesMap(containers []v1.Container) map[string]bool {
 	}
 
 	return volumeDevicesMap
+}
+
+func getPVVolumeGidAnnotationValue(pv *v1.PersistentVolume) string {
+	if volumeGid, ok := pv.Annotations[volumehelper.VolumeGidAnnotationKey]; ok {
+		return volumeGid
+	}
+
+	return ""
 }
