@@ -19,20 +19,13 @@ limitations under the License.
 package util
 
 import (
-	"errors"
 	"fmt"
-	"os"
-	"os/exec"
-	"strings"
-
-	"github.com/golang/glog"
 )
 
 // AttachFileDevice takes a path to a regular file and makes it available as an
 // attached block device.
 func (v VolumePathHandler) AttachFileDevice(path string) (string, error) {
-		return "", fmt.Errorf("AttachFileDevice not supported for this build.")
-	}
+	return "", fmt.Errorf("AttachFileDevice not supported for this build.")
 }
 
 // GetLoopDevice returns the full path to the loop device associated with the given path.
