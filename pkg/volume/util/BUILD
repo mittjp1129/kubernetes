@@ -17,6 +17,7 @@ go_library(
         "io_util.go",
         "metrics.go",
         "util.go",
+        "util_unsupported.go",
     ] + select({
         "@io_bazel_rules_go//go/platform:darwin_amd64": [
             "fs.go",
@@ -24,6 +25,7 @@ go_library(
         "@io_bazel_rules_go//go/platform:linux_amd64": [
             "device_util_linux.go",
             "fs.go",
+            "util_linux.go",
         ],
         "//conditions:default": [],
     }),
@@ -41,6 +43,7 @@ go_library(
         "//vendor/k8s.io/apimachinery/pkg/apis/meta/v1:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/labels:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/runtime:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/types:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/util/sets:go_default_library",
         "//vendor/k8s.io/client-go/kubernetes:go_default_library",
     ] + select({
