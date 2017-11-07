@@ -438,7 +438,7 @@ func (kl *Kubelet) GenerateRunContainerOptions(pod *v1.Pod, container *v1.Contai
 
 	blkVolumes, err := kl.makeBlockVolumes(pod, container, volumes)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	opts.Devices = append(opts.Devices, blkVolumes...)
 
